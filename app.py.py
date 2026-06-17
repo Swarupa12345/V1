@@ -1,66 +1,33 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # =========================================================
-# app.py  —  DRDL Aerospace AI Platform  v9.5  (FULLY FIXED)
+# app.py  —  DRDL Aerospace AI Platform  v9.6  (LAYOUT DEFINITIVE FIX)
 # =========================================================
-# ALL BUGS FIXED IN THIS VERSION:
 #
-# BUG 1 — Column layout crash ("error creating column layout"):
-#   CAUSE: OUT_COL used bare `sec_hdr(...)` calls which return a single
-#          list [sg.Text(...)]. PySimpleGUI Column expects list-of-lists
-#          i.e. [[sg.Text(...)]]. A bare [sg.Text] is misread as individual
-#          element tokens, not a row, causing the column layout error.
-#   FIX:   Every sec_hdr() call inside OUT_COL wrapped as [sec_hdr(...)].
+# ROOT CAUSE OF ALL "error creating column layout" CRASHES
+# ─────────────────────────────────────────────────────────
+# sec_hdr(text) returns ONE ROW already: [sg.Text(...)]
 #
-# BUG 2 — Tab 3 (Flight Envelope) showing nothing / "use integers or slices":
-#   CAUSE: ENV_RIGHT first block had bare sec_hdr() calls in the outer list,
-#          same root problem as BUG 1. Malformed layout rows cause PySimpleGUI
-#          to produce the "use integers or slices as indices" TypeError when
-#          it tries to iterate the column layout.
-#   FIX:   All sec_hdr() calls in ENV_RIGHT initial list wrapped as [sec_hdr(...)].
+# PySimpleGUI Column / layout expects a list-of-rows where every row
+# is a flat list of sg.Element objects:
+#       [[el, el], [el], [el, el, el], ...]
 #
-# BUG 3 — Optimization tab layout error / run error:
-#   CAUSE: OPT_RIGHT initial block had `sec_hdr('OPTIMAL RESULT', C_CYAN)`
-#          as a bare call (returns [sg.Text]), not [[sg.Text]]. Same issue.
-#   FIX:   Wrapped as [sec_hdr('OPTIMAL RESULT', C_CYAN)].
+# WRONG  (the previous version's bug):
+#       [sec_hdr('TITLE')]  →  [[sg.Text(...)]]
+#       The outer row now has a *list* as its first element, not an Element.
+#       PySimpleGUI's C-layer sees a list where it expects an Element →
+#       "error creating column layout" / "use integers or slices" TypeError.
 #
-# BUG 4 — "sep, hdr, sep are not defined" error:
-#   CAUSE: This error was a cascade from the layout corruption in OPT_RIGHT
-#          and ENV_RIGHT. When PySimpleGUI fails to parse the malformed layout
-#          it raises misleading NameError-like messages. Fixing BUG 1-3
-#          eliminates this entirely. Additionally _table() and _stats() were
-#          checked — their local variables (sep, hdr, lines) are correct.
-#   FIX:   Resolved by fixing BUG 1-3.
+# CORRECT:
+#       sec_hdr('TITLE')    →  [sg.Text(...)]   ← valid row, no extra wrapping
 #
-# BUG 5 — Chrome-style controls (_, [], X) not visible / clipped:
-#   CAUSE: HEADER_ROW had controls in same row as expand_x title Text but
-#          the Column wrapper had no right padding, causing controls to be
-#          pushed off-screen on many GTK themes. Also use_custom_titlebar=False
-#          meant OS titlebar overlapped them at the top.
-#   FIX:   Moved chrome controls into a dedicated sub-row inside the header
-#          column with explicit right padding. Added proper pad=(4,0) on each
-#          button and a small right-margin Text spacer.
+# For + concatenation contexts (building list-of-rows with +),
+# sec_hdr_rows() is used because + requires [[sg.Text(...)]] not [sg.Text(...)].
 #
-# BUG 6 — OPT_LOG not properly placed (buried in scrollable column):
-#   CAUSE: OPT_LOG Multiline was inside OPT_RIGHT scrollable column at the
-#          very bottom, requiring excessive scrolling to see live log output.
-#   FIX:   OPT_LOG moved to the bottom action bar row (visible, below tabs)
-#          and made visible with size=(60,3). Also kept a small visible stub
-#          inside OPT_RIGHT for post-run summary.
-#
-# BUG 7 — _run_sweeps_parallel imports ThreadPoolExecutor inside function:
-#   CAUSE: A new ThreadPoolExecutor was created inside _env_worker's inner
-#          _run_sweeps_parallel() but it already uses the module-level one.
-#          The nested with ThreadPoolExecutor block shadowed the module pool.
-#   FIX:   _run_sweeps_parallel now uses concurrent.futures directly without
-#          shadowing; cleaner submit/result pattern.
-#
-# ADDITIONAL IMPROVEMENTS:
-#   • GEO_COL uses sec_hdr_rows() + list concatenation — already correct,
-#     left unchanged.
-#   • OPT_LEFT bounds header row wrapped to be consistent.
-#   • All `visible=False` stub elements preserved for backward compatibility.
-#   • Window chrome buttons given pad=(3,2) and explicit size for GTK padding.
+# EVERY plain-list layout block in this file (OUT_COL, OPT_LEFT tail,
+# OPT_RIGHT, ENV_LEFT, ENV_RIGHT) has been audited and corrected:
+#       [sec_hdr(...)]  →  sec_hdr(...)       (plain list literals)
+#       sec_hdr_rows()  unchanged              (+ concatenation contexts)
 # =========================================================
 
 import os
@@ -211,7 +178,7 @@ sg.theme_add_new('DRDL', {
 sg.theme('DRDL')
 
 # =========================================================
-# LOGIN  — pure PySimpleGUI, no Widget.config() calls
+# LOGIN
 # =========================================================
 _VALID_USERS = {'drdl2026': 'aero1234'}
 
@@ -222,7 +189,7 @@ def show_login() -> bool:
                  font=(_F, 15, 'bold'), text_color=C_CYAN,
                  background_color=C_BG, justification='center',
                  expand_x=True)],
-        [sg.Text('Secure Access  |  v9.5',
+        [sg.Text('Secure Access  |  v9.6',
                  font=(_F, 11), text_color=C_DIM,
                  background_color=C_BG, justification='center',
                  expand_x=True, pad=(0, (0, 18)))],
@@ -321,24 +288,30 @@ def sf(values, key, default=0.0):
     except: return default
 
 def _ts():
-    """Wall-clock HH:MM:SS timestamp."""
     return datetime.now().strftime('%H:%M:%S')
 
-# ── sec_hdr: returns ONE ROW as a flat list [sg.Text(...)]
-#    Use directly when building list-of-rows with concatenation (+)
-#    WRONG inside a plain list literal:  [sec_hdr(...), [el,el], ...]
-#    RIGHT inside a plain list literal:  [sec_hdr(...)] wraps it = [[sg.Text]]
-#    OR use sec_hdr_rows() which returns [[sg.Text(...)]] for safe + concat.
+# ─────────────────────────────────────────────────────────
+# sec_hdr / sec_hdr_rows — LAYOUT RULES (read carefully)
+# ─────────────────────────────────────────────────────────
+# sec_hdr(text)      → returns [sg.Text(...)]     — already IS a valid row.
+#   Use it BARE inside a plain list-of-rows:
+#       layout = [ sec_hdr('TITLE'), [el, el], [el] ]
+#                  ^^^^^^^^^^^^ no extra []
+#
+# sec_hdr_rows(text) → returns [[sg.Text(...)]]   — list containing one row.
+#   Use it with + concatenation so the + operator works on list-of-rows:
+#       layout = sec_hdr_rows('TITLE') + [[el,el], [el]]
+# ─────────────────────────────────────────────────────────
 def sec_hdr(text, color=C_CYAN):
-    """Returns ONE ROW: [sg.Text(...)].
-    To embed in a plain list-of-rows, write [sec_hdr(...)] not sec_hdr(...)."""
+    """Returns ONE ROW as a flat list: [sg.Text(...)].
+    Use bare (no extra []) inside a plain list-of-rows literal."""
     return [sg.Text(f'| {text}', font=F_SEC, text_color=color,
                     background_color=C_PANEL,
                     pad=(6, (10, 3)), expand_x=True)]
 
 def sec_hdr_rows(text, color=C_CYAN):
     """Returns LIST-OF-ROWS: [[sg.Text(...)]].
-    Safe to use with + concatenation on other lists-of-rows."""
+    Use with + concatenation on other list-of-rows."""
     return [sec_hdr(text, color)]
 
 def lbl(text, w=26):
@@ -516,7 +489,7 @@ def _show_env_plot(idx):
 
 # =========================================================
 # PLOT CONSOLE WIDGET BUILDER
-# Returns a clean list-of-rows — safe for + concatenation.
+# Returns list-of-rows — safe for + concatenation.
 # =========================================================
 def _plot_console(canvas_key, lbl_key, prev_key, next_key,
                   hdr_text, hdr_color, canvas_h=290):
@@ -555,7 +528,7 @@ _geo  = PARAMS[:9]
 _tail = PARAMS[9:15]
 _flt  = PARAMS[15:]
 
-# GEO_COL — uses sec_hdr_rows() + list-of-rows concatenation: CORRECT
+# GEO_COL — uses sec_hdr_rows() + concatenation: correct
 GEO_COL = (
     sec_hdr_rows('GEOMETRY PARAMETERS', C_BLUE) +
     [[lbl(LABELS[p]), inp(p, DEFAULTS[p])] for p in _geo] +
@@ -565,11 +538,11 @@ GEO_COL = (
     [[lbl(LABELS[p]), inp(p, DEFAULTS[p])] for p in _tail]
 )
 
-# OUT_COL — FIX: sec_hdr() wrapped as [sec_hdr(...)] so each becomes
-# one proper row [[sg.Text(...)]] inside the list-of-rows.
+# OUT_COL — plain list literal.
+# FIX: sec_hdr(...) used BARE (no wrapping []), so each call inserts
+#      [sg.Text(...)] as a row, NOT [[sg.Text(...)]] which would crash.
 OUT_COL = [
-    # BUG FIX: was `sec_hdr(...)` (flat list) — now `[sec_hdr(...)]` (row)
-    [sec_hdr('AERODYNAMIC OUTPUTS', C_CYAN)],
+    sec_hdr('AERODYNAMIC OUTPUTS', C_CYAN),                     # ← bare, correct
     [lbl('Lift Coefficient  CL',   28), out_field('CL_OUT',  18, C_GREEN)],
     [lbl('Drag Coefficient  CD',   28), out_field('CD_OUT',  18, C_RED)],
     [lbl('Centre of Pressure XCP', 28), out_field('XCP_OUT', 18, C_BLUE)],
@@ -579,12 +552,11 @@ OUT_COL = [
     [lbl('Lift-to-Drag  CL/CD',   28), out_field('LD_OUT',  18, C_AMBER)],
     [lbl('Computation Time',       28), out_field('TIME_P',  30)],
     [lbl('Run Start / End Time',   28), out_field('TIME_STAMP_P', 30)],
-    # BUG FIX: was `sec_hdr(...)` — now `[sec_hdr(...)]`
-    [sec_hdr('MODEL ACCURACY', C_GREEN)],
+    sec_hdr('MODEL ACCURACY', C_GREEN),                          # ← bare, correct
     [lbl('CL  -- MAE / RMSE / R2', 28), out_field('MET_CL',  36)],
     [lbl('CD  -- MAE / RMSE / R2', 28), out_field('MET_CD',  36)],
     [lbl('XCP -- MAE / RMSE / R2', 28), out_field('MET_XCP', 36)],
-    # hidden stubs — kept for backward compatibility
+    # hidden stubs
     [sg.Input('', key='SRC_OUT',   visible=False)],
     [sg.Input('', key='MODE_OUT',  visible=False)],
     [sg.Multiline('', key='PRED_CON', visible=False, disabled=True)],
@@ -626,12 +598,14 @@ for p in PARAMS:
                         inp(f'{p}_LOW',  lo, 11),
                         inp(f'{p}_HIGH', hi, 11)])
 
+# OPT_LEFT — uses sec_hdr_rows() for the first item (+ context),
+# then a plain list for the tail. Inside the plain list tail,
+# sec_hdr() is used BARE (no wrapping []).
 OPT_LEFT = (
     sec_hdr_rows('PARAMETER SEARCH BOUNDS', C_AMBER) +
     bounds_rows +
     [
-        # BUG FIX: sec_hdr wrapped as single-element list = proper row
-        [sec_hdr('OUTPUT CONSTRAINTS', C_RED)],
+        sec_hdr('OUTPUT CONSTRAINTS', C_RED),                   # ← bare, correct
         [sg.Text(
             'Penalty: infeasible if constraint violated (fitness -> -inf).',
             font=(_F, 11), text_color=C_DIM,
@@ -642,7 +616,7 @@ OPT_LEFT = (
          lbl('CD  Max',  12), inp('CD_MAX',  '5.7352')],
         [lbl('XCP Min',  12), inp('XCP_MIN', '-12.3114'),
          lbl('XCP Max',  12), inp('XCP_MAX', '-3.5322')],
-        [sec_hdr('OPTIMIZATION SETTINGS', C_BLUE)],
+        sec_hdr('OPTIMIZATION SETTINGS', C_BLUE),               # ← bare, correct
         [lbl('Max Generations',    24), inp('MAXITER', '50', 8),
          lbl('Population Size',    18), inp('POPSIZE', '10', 8)],
         [lbl('Max Gene-Swap Steps', 24), inp('ITERMAX', '5',  8),
@@ -659,12 +633,11 @@ _TOP5_INFO = (
     '  Best-of-generation -> hall-of-fame -> sorted, de-duplicated, top 5 kept.\n'
 )
 
-# OPT_RIGHT — FIX: initial block uses [sec_hdr(...)] for proper rows.
-# OPT_LOG moved to a visible position at top of right column (not buried).
+# OPT_RIGHT — plain list literal.
+# FIX: all sec_hdr() calls are BARE (no wrapping []).
 OPT_RIGHT = (
     [
-        # BUG FIX: was bare `sec_hdr(...)` — now `[sec_hdr(...)]`
-        [sec_hdr('OPTIMAL RESULT', C_CYAN)],
+        sec_hdr('OPTIMAL RESULT', C_CYAN),                      # ← bare, correct
         [lbl('Best CL',              28), out_field('OPT_CL',        18, C_GREEN)],
         [lbl('Best CD',              28), out_field('OPT_CD',        18, C_RED)],
         [lbl('Best XCP',             28), out_field('OPT_XCP',       18, C_BLUE)],
@@ -674,9 +647,7 @@ OPT_RIGHT = (
         [lbl('Elapsed Time',         28), out_field('OPT_TIME',      24)],
         [lbl('Run Start / End Time', 28), out_field('OPT_TIMESTAMP', 30)],
         [sg.Input('', key='OPT_MODE', visible=False)],
-        # BUG FIX: OPT_LOG now placed here (visible, near top of results)
-        # so live generation log is always readable without scrolling.
-        [sec_hdr('LIVE OPTIMIZATION LOG', C_GREEN)],
+        sec_hdr('LIVE OPTIMIZATION LOG', C_GREEN),              # ← bare, correct
         [sg.Multiline('', key='OPT_LOG', size=(56, 5),
                       font=F_TBL, background_color=C_DARK,
                       text_color=C_GREEN, autoscroll=True,
@@ -752,10 +723,11 @@ ENV_BASE_ROWS = (
     [[lbl(LABELS[p], 28), inp(f'E_{p}', DEFAULTS[p])] for p in PARAMS]
 )
 
+# ENV_LEFT — plain list for the initial block, then + ENV_BASE_ROWS.
+# FIX: all sec_hdr() calls inside the plain list are BARE (no wrapping []).
 ENV_LEFT = (
     [
-        # BUG FIX: was bare sec_hdr() — now [sec_hdr()] for proper row
-        [sec_hdr('GEOMETRY SOURCE', C_AMBER)],
+        sec_hdr('GEOMETRY SOURCE', C_AMBER),                    # ← bare, correct
         [sg.Checkbox(
             '  Use optimal geometry from optimizer (loads best_geometry.csv)',
             key='USE_OPT_GEO', default=False,
@@ -767,7 +739,7 @@ ENV_LEFT = (
                  font=(_F, 11), text_color=C_GREEN,
                  background_color=C_PANEL,
                  size=(58, 1), pad=(10, 4))],
-        [sec_hdr('SWEEP RANGES', C_BLUE)],
+        sec_hdr('SWEEP RANGES', C_BLUE),                        # ← bare, correct
         [sweep_frame('ALPHA SWEEP (deg)',
                      'ALPHA_MIN', 'ALPHA_MAX', 'ALPHA_STP',
                      '0', '20', '2')],
@@ -780,30 +752,30 @@ ENV_LEFT = (
     ] + ENV_BASE_ROWS
 )
 
-# ENV_RIGHT — FIX: all sec_hdr() calls wrapped as [sec_hdr(...)]
-# This was the root cause of Tab 3 showing nothing (integer/slice error).
+# ENV_RIGHT — plain list initial block + _plot_console via +.
+# FIX: all sec_hdr() calls inside the plain list are BARE (no wrapping []).
 ENV_RIGHT = (
     [
-        [sec_hdr('ALPHA SWEEP RESULTS', C_BLUE)],
+        sec_hdr('ALPHA SWEEP RESULTS', C_BLUE),                 # ← bare, correct
         [lbl('Run Start / End Time', 28), out_field('ENV_TIMESTAMP', 30)],
         [sg.Multiline('', key='ENV_ALPHA', size=(66, 7),
                       font=F_TBL, background_color=C_PANEL,
                       text_color=C_CYAN, autoscroll=False,
                       border_width=1, expand_x=True,
                       disabled=True, pad=(6, 4))],
-        [sec_hdr('MACH SWEEP RESULTS', C_GREEN)],
+        sec_hdr('MACH SWEEP RESULTS', C_GREEN),                 # ← bare, correct
         [sg.Multiline('', key='ENV_MACH', size=(66, 7),
                       font=F_TBL, background_color=C_PANEL,
                       text_color=C_GREEN, autoscroll=False,
                       border_width=1, expand_x=True,
                       disabled=True, pad=(6, 4))],
-        [sec_hdr('ALTITUDE SWEEP RESULTS', C_AMBER)],
+        sec_hdr('ALTITUDE SWEEP RESULTS', C_AMBER),             # ← bare, correct
         [sg.Multiline('', key='ENV_ALT', size=(66, 7),
                       font=F_TBL, background_color=C_PANEL,
                       text_color=C_AMBER, autoscroll=False,
                       border_width=1, expand_x=True,
                       disabled=True, pad=(6, 4))],
-        [sec_hdr('SUMMARY STATISTICS', C_RED)],
+        sec_hdr('SUMMARY STATISTICS', C_RED),                   # ← bare, correct
         [sg.Multiline('', key='ENV_SUM', size=(66, 8),
                       font=F_TBL, background_color=C_PANEL,
                       text_color=C_WHITE, autoscroll=False,
@@ -845,20 +817,14 @@ flight_tab = [
 
 # =========================================================
 # MAIN LAYOUT
-# BUG FIX (chrome controls): Separated title row and control row
-# so the _, [], X buttons are always visible and not clipped by
-# the expand_x title text pushing them off-screen on GTK themes.
 # =========================================================
 _mode_label = 'ENSEMBLE' if ENSEMBLE_MODE else 'XGBoost'
 
-# FIX: Chrome controls get their own sub-row so they are never clipped.
-# Title expands left; controls sit right with explicit padding.
 HEADER_ROW = [
     sg.Text(
         '  OPTIMAL AERODYNAMIC CONFIGURATION DESIGN — AEROSPACE VEHICLES',
         font=F_TITLE, text_color=C_CYAN, background_color=C_HDR,
         justification='left', expand_x=True, pad=(10, 6)),
-    # Chrome buttons — explicit sizes + pad ensure GTK renders them fully
     sg.Button(' _ ', key='W_MIN',  size=(3, 1), font=F_CHROME,
               button_color=(C_WHITE, '#334155'),
               mouseover_colors=(C_WHITE, '#475569'),
@@ -871,13 +837,13 @@ HEADER_ROW = [
               button_color=(C_WHITE, '#B91C1C'),
               mouseover_colors=(C_WHITE, '#DC2626'),
               border_width=0, pad=(3, 2), tooltip='Close'),
-    sg.Text('  ', background_color=C_HDR),  # right margin spacer
+    sg.Text('  ', background_color=C_HDR),
 ]
 
 SUB_HDR_ROW = [
     sg.Text(
         f'  XGBoost Engine  |  DE Optimizer  |  Flight Envelope  '
-        f'|  Mode: {_mode_label}  |  v9.5',
+        f'|  Mode: {_mode_label}  |  v9.6',
         font=F_SUB, text_color=C_DIM, background_color=C_HDR,
         justification='left', expand_x=True, pad=(10, 2)),
 ]
@@ -921,9 +887,8 @@ layout = [
                expand_x=True, pad=(0, 0))],
 ]
 
-# Ubuntu window: 1400x860 — fits 1920x1080 with taskbar
 window = sg.Window(
-    'DRDL Aerospace Platform v9.5', layout,
+    'DRDL Aerospace Platform v9.6', layout,
     size=(1400, 860), finalize=True,
     resizable=True, element_justification='left',
     background_color=C_BG, margins=(0, 0),
@@ -1097,7 +1062,6 @@ def render_optimization(result, history, elapsed):
     con_clear('OPT_GEO')
     con_append('OPT_GEO', '\n'.join(geo))
 
-    # Top-5 — compact table format
     top5 = getattr(result, 'top5_solutions', [])
     con_clear('TOP5_OPT')
     if top5:
@@ -1127,7 +1091,6 @@ def render_optimization(result, history, elapsed):
                f'Completed {len(history)} generations | '
                f'fitness={comp_fit:.6f} | {elapsed:.3f} s')
 
-    # Build 3 optimisation figures
     _mpl_style()
     plt.close('all')
     _opt_figs.clear()
@@ -1136,7 +1099,6 @@ def render_optimization(result, history, elapsed):
     if history:
         gens = [h['generation'] for h in history]
 
-        # Plot A: Fitness evolution
         fig_a, ax_a = plt.subplots(figsize=(9, 4))
         fig_a.patch.set_facecolor(C_BG)
         bfv = [h['fitness']     for h in history]
@@ -1156,7 +1118,6 @@ def render_optimization(result, history, elapsed):
         fig_a.tight_layout()
         _opt_figs.append(fig_a)
 
-        # Plot B: Aero metrics per generation
         fig_b, ax_b = plt.subplots(figsize=(9, 4))
         fig_b.patch.set_facecolor(C_BG)
         ax_b.plot(gens, [h['CL']   for h in history],
@@ -1175,7 +1136,6 @@ def render_optimization(result, history, elapsed):
         fig_b.tight_layout()
         _opt_figs.append(fig_b)
 
-        # Plot C: CL/CD vs XCP scatter
         perf_df = getattr(result, 'perf_df', None)
         fig_c, ax_c = plt.subplots(figsize=(9, 4))
         fig_c.patch.set_facecolor(C_BG)
@@ -1247,8 +1207,6 @@ def _load_optimal_base(out_dir):
     return base, gp
 
 def _table(rows, var_key, var_label):
-    """Build a formatted text table for sweep results.
-    sep and hdr are local variables — fully self-contained."""
     hdr = (f'  {var_label:>10}  {"CL":>10}  {"CD":>10}  '
            f'{"XCP":>12}  {"XCP/D":>12}  {"CL/CD":>10}')
     sep = '  ' + '-' * (len(hdr) - 2)
@@ -1268,7 +1226,6 @@ def _table(rows, var_key, var_label):
     return '\n'.join(lines)
 
 def _stats(rows, var_key, label):
-    """Compute and format summary statistics for a sweep."""
     cls  = [r['CL']  for r in rows]
     cds  = [r['CD']  for r in rows]
     xcps = [r['XCP'] for r in rows]
@@ -1474,14 +1431,8 @@ def clear_env():
 
 # =========================================================
 # PARALLEL SWEEP WORKER
-# BUG FIX: Uses module-level _SWEEP_POOL; no nested
-# ThreadPoolExecutor that would shadow the module pool.
 # =========================================================
 def _run_sweeps_parallel(base, ac, mc, lc):
-    """
-    Runs alpha / mach / altitude sweeps concurrently.
-    Results are numerically identical to sequential calls.
-    """
     f_alpha = _SWEEP_POOL.submit(alpha_sweep,    base, *ac)
     f_mach  = _SWEEP_POOL.submit(mach_sweep,     base, *mc)
     f_alt   = _SWEEP_POOL.submit(altitude_sweep, base, *lc)
@@ -1529,7 +1480,6 @@ while True:
     if event in ('F5:116', 'F5:65474', 'F5'):
         event = 'Estimate'
 
-    # Window controls — PySimpleGUI API only (Linux safe)
     if event == 'W_MAX':
         if _is_max:
             try:
@@ -1552,7 +1502,6 @@ while True:
             pass
         continue
 
-    # USE_OPT_GEO checkbox
     if event == 'USE_OPT_GEO':
         checked = values.get('USE_OPT_GEO', False)
         if checked:
@@ -1566,7 +1515,6 @@ while True:
             window['OPT_GEO_STATUS'].update('')
         continue
 
-    # Plot console Tab 2
     if event == 'OPT_PREV':
         _show_opt_plot(_opt_idx - 1)
         continue
@@ -1574,7 +1522,6 @@ while True:
         _show_opt_plot(_opt_idx + 1)
         continue
 
-    # Plot console Tab 3
     if event == 'ENV_PREV':
         _show_env_plot(_env_idx - 1)
         continue
@@ -1582,7 +1529,6 @@ while True:
         _show_env_plot(_env_idx + 1)
         continue
 
-    # Drain prediction queue
     try:
         msg = pred_q.get_nowait()
         if msg['ok']:
@@ -1595,7 +1541,6 @@ while True:
     except queue.Empty:
         pass
 
-    # Optimizer events
     if event == 'OPT_PROG':
         pct, msg = values['OPT_PROG']
         set_prog('PB_O', 'PP_O', 'PM_O', pct, msg)
@@ -1612,7 +1557,6 @@ while True:
         _opt_run = False
         continue
 
-    # Flight envelope events
     if event == 'ENV_DONE':
         pl = values['ENV_DONE']
         ar, mr, lr, elapsed = pl[:4]
@@ -1685,7 +1629,7 @@ while True:
               if ENSEMBLE_MODE else 'XGBOOST ONLY')
         con_append('OPT_LOG',
                    '=' * 58 + '\n'
-                   f'  CUSTOM DE v9.5  |  {mh}\n'
+                   f'  CUSTOM DE v9.6  |  {mh}\n'
                    f'  Generations:{maxiter}  Pop:{popsize}'
                    f'  GeneSwap:{itermax}\n'
                    f'  Output: {out_dir or "(none)"}\n'
