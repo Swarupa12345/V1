@@ -1,0 +1,29 @@
+Project Overview
+DRDL Aerospace AI Platform (v9.5) is a login-protected desktop tool with three tabs — Prediction, Optimizer, and Flight Envelope. 
+It predicts a vehicle's aerodynamic behavior instantly using AI, finds the best possible design automatically, and tests that design across a range of flight conditions. 
+All three functions run from one dashboard, replacing slow CFD simulation runs with fast, on-demand results.
+
+Methodology Used
+Predictions come from an XGBoost Regression model, trained to output CL, CD, and XCP from 18 geometry/flight inputs, with inputs normalized via MinMaxScaler. 
+Design optimization uses a custom Differential Evolution (DE) algorithm — an evolutionary search across generations — guided by a fitness function balancing lift-to-drag ratio and centre-of-pressure stability, with CD ≥ 0.12 as a hard constraint. 
+
+Tab 1 — Prediction
+User enters 18 geometry and flight-condition parameters and clicks "ESTIMATE." The model instantly returns CL, CD, XCP, and CL/CD, along with computation time. 
+Model accuracy (MAE, RMSE, R²) is shown alongside every prediction so results come with a trust indicator, not just a number.
+
+Tab 2 — Optimizer
+User sets search bounds for all 18 parameters, output constraints, and DE settings (generations, population, gene-swap steps), then clicks "RUN OPTIMIZER." 
+It returns the single best design (CL, CD, XCP, CL/CD, fitness score) plus a Top-5 ranked shortlist of alternative strong designs.
+
+Tab 3 — Flight Envelope
+User defines Min/Max/Step ranges for Alpha, Mach, and Altitude, using either a manual base geometry or the Optimizer's best result. "RUN SWEEPS" evaluates the model across each range, producing result tables, 
+summary stats, and CL/CD/XCP behavior trends — essentially a simulated flight-test campaign, exportable to CSV.
+
+Visualization / Plot Console
+Optimizer and Flight Envelope tabs each embed a live plot console with ◄/► navigation and zoom-on-double-click. Optimizer shows Fitness Evolution, Metrics per Generation, and CL/CD-vs-XCP; 
+Flight Envelope shows Alpha, Mach, and Altitude sweep plots — all auto-saved as PNGs.
+
+
+Outputs Summary
+The platform delivers three outputs: single-point predictions with confidence metrics, an optimized best design with a Top-5 shortlist, and full flight-envelope performance data with plots and CSV export — 
+covering "what if," "what's best," and "how does it behave across the flight envelope," all without CFD.
